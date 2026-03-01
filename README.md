@@ -14,7 +14,7 @@
 
 ## Architecture
 
-![SS&C Hello World Architecture](evidence/architecture.png)
+![SS&C Hello World Architecture](evidence/SSNC_Architecture_Desgin.drawio.png)
 
 > Full architecture diagram showing VPC, ALB, ECS Fargate, ECR, IAM, and CloudWatch across 2 Availability Zones in us-east-1.
 
