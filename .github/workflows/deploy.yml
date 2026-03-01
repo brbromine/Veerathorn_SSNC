@@ -114,19 +114,16 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: "1.6.0"
-
-      - name: Get ALB DNS name
+      - name: Get ALB DNS name from AWS
         id: alb
-        working-directory: terraform
         run: |
-          cp terraform.tfvars.example terraform.tfvars
-          terraform init -reconfigure
-          ALB_URL=$(terraform output -raw alb_dns_name)
+          ALB_URL=$(aws elbv2 describe-load-balancers \
+            --names "$PROJECT_NAME-alb" \
+            --query "LoadBalancers[0].DNSName" \
+            --output text \
+            --region us-east-1)
           echo "url=$ALB_URL" >> $GITHUB_OUTPUT
+          echo "ALB URL: $ALB_URL"
 
       - name: Wait for ECS service to stabilise
         run: sleep 60
