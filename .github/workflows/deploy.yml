@@ -11,50 +11,10 @@ env:
   PROJECT_NAME: ssnc-hello-world
 
 jobs:
-  # ── Job 1: Build & push Docker image to ECR ──────────────────────────────────
-  build-and-push:
-    name: Build & Push Docker Image
-    runs-on: ubuntu-latest
-
-    outputs:
-      image_tag: ${{ steps.meta.outputs.image_tag }}
-      ecr_url: ${{ steps.login-ecr.outputs.registry }}
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Set image tag
-        id: meta
-        run: echo "image_tag=${{ github.sha }}" >> $GITHUB_OUTPUT
-
-      - name: Build, tag & push image to ECR
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          IMAGE_TAG: ${{ steps.meta.outputs.image_tag }}
-        run: |
-          docker build -t $ECR_REGISTRY/$PROJECT_NAME:$IMAGE_TAG ./app
-          docker tag $ECR_REGISTRY/$PROJECT_NAME:$IMAGE_TAG $ECR_REGISTRY/$PROJECT_NAME:latest
-          docker push $ECR_REGISTRY/$PROJECT_NAME:$IMAGE_TAG
-          docker push $ECR_REGISTRY/$PROJECT_NAME:latest
-          echo "Pushed image: $ECR_REGISTRY/$PROJECT_NAME:$IMAGE_TAG"
-
-  # ── Job 2: Terraform apply ────────────────────────────────────────────────────
+  # ── Job 1: Terraform apply (creates ECR + all infra) ─────────────────────────
   terraform:
     name: Terraform Apply
     runs-on: ubuntu-latest
-    needs: build-and-push
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     defaults:
@@ -95,11 +55,52 @@ jobs:
       - name: Output ALB URL
         run: terraform output alb_dns_name
 
+  # ── Job 2: Build & push Docker image to ECR (after ECR repo exists) ───────────
+  build-and-push:
+    name: Build & Push Docker Image
+    runs-on: ubuntu-latest
+    needs: terraform
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag & push image to ECR
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build -t $ECR_REGISTRY/$PROJECT_NAME:$IMAGE_TAG ./app
+          docker tag $ECR_REGISTRY/$PROJECT_NAME:$IMAGE_TAG $ECR_REGISTRY/$PROJECT_NAME:latest
+          docker push $ECR_REGISTRY/$PROJECT_NAME:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$PROJECT_NAME:latest
+          echo "Pushed image: $ECR_REGISTRY/$PROJECT_NAME:$IMAGE_TAG"
+
+      - name: Force ECS service to redeploy with new image
+        run: |
+          aws ecs update-service \
+            --cluster $PROJECT_NAME-cluster \
+            --service $PROJECT_NAME-service \
+            --force-new-deployment \
+            --region us-east-1
+
   # ── Job 3: Integration / health check test ────────────────────────────────────
   integration-test:
     name: Integration Health Check
     runs-on: ubuntu-latest
-    needs: terraform
+    needs: build-and-push
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
 
     steps:
