@@ -6,9 +6,9 @@
 
 | | URL |
 |---|---|
-| **Hello World UI** | http://ssnc-hello-world-alb-1578263140.us-east-1.elb.amazonaws.com |
-| **Health Check** | http://ssnc-hello-world-alb-1578263140.us-east-1.elb.amazonaws.com/health |
-| **Swagger Docs** | http://ssnc-hello-world-alb-1578263140.us-east-1.elb.amazonaws.com/docs |
+| **Hello World UI** | http://ssnc-hello-world-alb-1675712513.us-east-1.elb.amazonaws.com |
+| **Health Check** | http://ssnc-hello-world-alb-1675712513.us-east-1.elb.amazonaws.com/health |
+| **Swagger Docs** | http://ssnc-hello-world-alb-1675712513.us-east-1.elb.amazonaws.com/docs |
 
 ---
 
