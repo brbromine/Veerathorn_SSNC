@@ -4,7 +4,7 @@ terraform {
   # Remote state on Terraform Cloud (free) — keeps state between CI/CD runs
   # without needing AWS S3. Every runner reads/writes the same state file.
   cloud {
-    organization = "ssnc-veerathorn"  # replace with your Terraform Cloud org name
+    organization = "ssnc-hello-world"  # replace with your Terraform Cloud org name
     workspaces {
       name = "ssnc-hello-world"
     }
