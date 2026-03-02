@@ -186,7 +186,7 @@ async def echo(payload: EchoRequest, request: Request):
     elif msg.lower() == "veerathorn":
         reply = "Hi! It's me Veerathorn, Nice to meet you! 🙌"
     else:
-        reply = "Please try one of the options: type 'Hello World' or 'Veerathorn'"
+        reply = "Please try one of the options: types 'Hello World' or 'Veerathorn'"
 
     # Structured log — visible in CloudWatch Log Groups → /ecs/ssnc-hello-world
     logger.info(
