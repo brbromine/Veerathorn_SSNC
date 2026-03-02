@@ -18,17 +18,29 @@
 
 > Full architecture diagram showing VPC, ALB, ECS Fargate, ECR, IAM, and CloudWatch across 2 Availability Zones in us-east-1.
 
+### Architecture Notes
+
+- **ALB** is a single resource — AWS automatically places an ALB node in each AZ's subnet. It is not two separate load balancers.
+- **ECS Cluster** runs `desired_count = 1` (single task for cost reasons). The task can land in either AZ. Set to `2` for true zero-downtime HA across both AZs.
+- **Security groups** are attached to the services (ALB and ECS tasks), not the subnets themselves.
+- **Route Table** — one shared public route table (`0.0.0.0/0 → IGW`) is associated to both subnets. Traffic from the internet enters via the IGW, gets routed to the subnet, then hits the ALB.
+- **GitHub Actions** never enters the VPC — it talks directly to AWS APIs (ECR, ECS, Terraform) over HTTPS using IAM credentials.
+
 ### AWS Services Used
 
 | Service | Purpose |
 |---|---|
 | **ECS Fargate** | Serverless container runtime — no EC2 to manage |
 | **ECR** | Private Docker image registry |
-| **ALB** | Internet-facing load balancer, routes HTTP traffic |
-| **VPC + Subnets** | Isolated network across 2 availability zones |
-| **CloudWatch Logs** | Container stdout/stderr logs |
-| **CloudWatch Alarms** | CPU and memory threshold alerts |
-| **IAM** | Least-privilege execution role for ECS |
+| **ALB** | Internet-facing load balancer, spans 2 AZs, routes HTTP traffic |
+| **VPC + Subnets** | Isolated network, 2 public subnets across 2 AZs (required by ALB) |
+| **IGW** | Internet Gateway — entry point for all inbound internet traffic |
+| **Route Table** | Single public route table (`0.0.0.0/0 → IGW`) shared by both subnets |
+| **CloudWatch Logs** | Container stdout/stderr logs (`/ecs/ssnc-hello-world`, 7-day retention) |
+| **CloudWatch Alarms** | CPU > 80% and Memory > 80% threshold alerts |
+| **Container Insights** | ECS cluster-level metrics dashboard |
+| **IAM** | Least-privilege execution role — ECR pull + CloudWatch write only |
+| **Terraform Cloud** | Remote state store for Terraform (local execution mode) |
 
 ---
 
@@ -90,29 +102,66 @@ Every submission is logged to **CloudWatch** with timestamp, IP, input, and repl
 
 ## CI/CD Pipeline
 
-**GitHub Actions** — triggers on every push to `main`.
+**GitHub Actions** — triggers on every push to `main`, or manually via **Run workflow** with a deploy mode choice.
+
+### Deploy Modes
+
+| Mode | When to Use | Jobs That Run |
+|---|---|---|
+| `full` | First deploy or after infrastructure changes | Terraform + Build & Push + Integration Test |
+| `app-only` | Code-only changes — infra already exists | Build & Push + Integration Test (Terraform skipped) |
+
+Trigger manually: **GitHub → Actions → Deploy → Run workflow → choose mode**
+
+### Pipeline Flow
 
 ```
-Push to main
-      │
-      ▼
-┌─────────────────────┐
-│  Job 1: Terraform   │  terraform init → validate → plan → apply
-│  Apply              │  Creates all AWS infrastructure
-└──────────┬──────────┘
+Push to main (or workflow_dispatch)
            │
            ▼
-┌─────────────────────┐
-│  Job 2: Build &     │  docker build → push to ECR
-│  Push               │  aws ecs update-service --force-new-deployment
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│  Job 3: Integration │  health_check.sh hits live ALB /health
-│  Health Check       │  Fails pipeline if not HTTP 200
-└─────────────────────┘
+┌────────────────────────────────────────────┐
+│  Job 1: Terraform Apply  [full mode only]  │
+│                                            │
+│  terraform init  ──────────────────────►  Terraform Cloud
+│  terraform plan                           (remote state store)
+│  terraform apply                               │
+│       └── Creates AWS infra ◄─────────────────┘
+└──────────────────────┬─────────────────────────┘
+                       │ (skipped in app-only mode)
+                       ▼
+┌───────────────────────────────────────────────┐
+│  Job 2: Build & Push  [full + app-only]       │
+│                                               │
+│  docker build → tag :latest → push to ECR    │
+│  aws ecs update-service --force-new-deployment│
+└──────────────────────┬────────────────────────┘
+                       │
+                       ▼
+┌───────────────────────────────────────────────┐
+│  Job 3: Integration Health Check              │
+│                                               │
+│  health_check.sh → curl ALB /health          │
+│  Fails pipeline if not HTTP 200               │
+└───────────────────────────────────────────────┘
 ```
+
+---
+
+## Terraform State Management
+
+Terraform state is stored in **Terraform Cloud** (free tier) using the `cloud {}` backend block in `versions.tf`.
+
+| Setting | Value |
+|---|---|
+| **Organization** | `ssnc-veerathorn` |
+| **Workspace** | `ssnc-hello-world` |
+| **Execution mode** | Local (plan/apply runs on GitHub Actions runner — not TF Cloud servers) |
+| **State storage** | Terraform Cloud (remote, versioned, locked) |
+
+**Why this matters**: Local state files (`terraform.tfstate`) are ephemeral on GitHub Actions runners — they are lost after each run. With Terraform Cloud as the backend, state is persisted remotely, which means:
+- Subsequent runs correctly detect existing AWS resources (no "already exists" errors)
+- State is versioned and recoverable
+- `TF_API_TOKEN` in GitHub Secrets authenticates the runner to Terraform Cloud
 
 ---
 
@@ -132,5 +181,19 @@ All infrastructure is defined as code across 5 modules:
 - IAM role follows **least privilege** — only ECR pull and CloudWatch write
 - No secrets hardcoded — AWS credentials passed via GitHub Secrets
 
+---
+
+## What I'd Add with More Time
+
+| Addition | Reason |
+|---|---|
+| HTTPS + ACM certificate | Encrypt traffic in transit; terminate TLS at the ALB |
+| Private subnets + NAT Gateway | Move ECS tasks off public subnets for defence in depth |
+| AWS Secrets Manager | Rotate secrets without redeploying the container |
+| ECS Auto Scaling (target tracking) | Scale task count based on CPU/memory — not just `desired_count = 1` |
+| WAF on the ALB | Block common web exploits at the edge |
+| Route 53 record | Friendly domain name instead of raw ALB DNS |
+| AWS X-Ray | Distributed tracing across requests |
+| `desired_count = 2` | One task per AZ for true zero-downtime rolling deploys |
 
 
