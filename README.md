@@ -180,6 +180,7 @@ All infrastructure is defined as code across 5 modules:
 - No direct public access to containers
 - IAM role follows **least privilege** — only ECR pull and CloudWatch write
 - No secrets hardcoded — AWS credentials passed via GitHub Secrets
+- **CI/CD IAM user** (`ssnc-terraform-user`) — dedicated AWS IAM user for GitHub Actions; console access disabled, no human login. Its access keys are stored as `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` in GitHub Secrets and used by the pipeline to call AWS APIs (ECR, ECS, Terraform)
 
 ---
 
